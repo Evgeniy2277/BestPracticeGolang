@@ -1,2 +1,2 @@
-# BestPractcGolang
+# BestPracticeGolang
 BestPractcGolang
