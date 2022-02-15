@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -13,9 +14,8 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"go.uber.org/zap"
 )
-
-// var sig2 int
 
 
 type CrawlResult struct {
@@ -106,15 +106,19 @@ type crawler struct {
 	visited map[string]struct{}
 	mu      sync.RWMutex
 	chUpDepth chan bool
+	logger *zap.Logger
+
 }
 
-func NewCrawler(r Requester) *crawler {
+func NewCrawler(r Requester, loger *zap.Logger) *crawler {
 	return &crawler{
 		r:       r,
 		res:     make(chan CrawlResult),
 		visited: make(map[string]struct{}),
 		mu:      sync.RWMutex{},
 		chUpDepth: make(chan bool, 1),
+		logger:  loger,
+
 	}
 }
 
@@ -160,6 +164,9 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 		}		
 
 		for _, link := range page.GetLinks() {
+			if depth == 1 {
+				c.logger.Panic("dept == 1 PANIC message")
+			}
 			go c.Scan(ctx, link, depth-1) //На все полученные ссылки запускаем новую рутину сборки
 		}
 	}
@@ -180,6 +187,54 @@ type Config struct {
 
 func main() {
 
+    logger, _ := zap.NewDevelopment()
+	logger.Debug("This is a DEBUG message")
+	// logger.Debug("This is a DEBUG message")
+	logger.Info("This is an INFO message")
+	logger.Info("This is an INFO message with fields", zap.String("region", "us-west"), zap.Int("id", 2))
+	// logger.Warn("This is a WARN message")
+	// logger.Error("This is an ERROR message")
+	// logger.Fatal("This is a FATAL message")   // would exit if uncommented
+	// logger.DPanic("This is a DPANIC message") // would exit if uncommented
+	// logger.Panic("This is a PANIC message")    // would exit if uncommented
+	rawJSONConfig := []byte(`{
+		"level": "info",
+		"encoding": "console",
+		"outputPaths": ["stdout", "/tmp/logs"],
+		"errorOutputPaths": ["/tmp/errorlogs"],
+		"initialFields": {"initFieldKey": "fieldValue"},
+		"encoderConfig": {
+		"messageKey": "message",
+		"levelKey": "level",
+		"nameKey": "logger",
+		"timeKey": "time",
+		"callerKey": "logger",
+		"stacktraceKey": "stacktrace",
+		"callstackKey": "callstack",
+		"errorKey": "error",
+		"timeEncoder": "iso8601",
+		"fileKey": "file",
+		"levelEncoder": "capitalColor",
+		"durationEncoder": "second",
+		"callerEncoder": "full",
+		"nameEncoder": "full",
+		"sampling": {
+			"initial": "3",
+			"thereafter": "10"
+		}
+		}
+	}`)
+
+	config := zap.Config{}
+	if err := json.Unmarshal(rawJSONConfig, &config); err != nil {
+		panic(err)
+	}
+
+	logger, err := config.Build()
+	if err != nil {
+		panic(err)
+	}
+
 	cfg := Config{
 		MaxDepth:   3,
 		MaxResults: 1000,
@@ -191,7 +246,7 @@ func main() {
 	//var r Requester
 
 	r := NewRequester(time.Duration(cfg.Timeout) * time.Second)
-	cr := NewCrawler(r)
+	cr := NewCrawler(r, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	// ctx, cancel := context.WithTimeout(ctx, time.Second * 300)
 	// _ = cancel1
@@ -201,6 +256,7 @@ func main() {
 	sigCh := make(chan os.Signal, 1)        //Создаем канал для приема сигналов, ругался тест добавил 1
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGUSR1) //Подписываемся на сигнал SIGINT, SIGUSR1
  
+    
 	for {
 		select {
 			case <-ctx.Done(): 
@@ -240,4 +296,6 @@ func processResult(ctx context.Context, cancel func(), cr Crawler, cfg Config) {
 			}
 		}
 	}
+
+
 }
