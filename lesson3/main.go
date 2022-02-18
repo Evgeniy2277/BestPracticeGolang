@@ -2,17 +2,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
-	"log"
+    "log"
 	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
-
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
 )
@@ -107,10 +104,10 @@ type crawler struct {
 	mu      sync.RWMutex
 	chUpDepth chan bool
 	logger *zap.Logger
-
+	wg sync.WaitGroup
 }
 
-func NewCrawler(r Requester, loger *zap.Logger) *crawler {
+func NewCrawler(r Requester, loger *zap.Logger, wg sync.WaitGroup) *crawler {
 	return &crawler{
 		r:       r,
 		res:     make(chan CrawlResult),
@@ -118,14 +115,15 @@ func NewCrawler(r Requester, loger *zap.Logger) *crawler {
 		mu:      sync.RWMutex{},
 		chUpDepth: make(chan bool, 1),
 		logger:  loger,
-
+		wg: wg,
 	}
 }
 
 func (c *crawler) Scan(ctx context.Context, url string, depth int) {
-
-
-	if depth <= 0 { //Проверяем то, что есть запас по глубине
+	defer c.wg.Done()
+	
+	if depth <= 0 { 
+		c.logger.Info("depth <= 0 in Scan", zap.Int("", depth))
 		return
 	}
 	c.mu.RLock()
@@ -139,15 +137,11 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 
 	case <-c.chUpDepth:
 		depth += 2
-		log.Default().Println("dept+ = ", depth)
+		c.logger.Debug("dept+ = ", zap.Int("depth", depth))
 
 	case <-ctx.Done(): //Если контекст завершен - прекращаем выполнение
 		return
 		
-	case <- time.After(1 * time.Microsecond):
-		var err error
-		c.res <- CrawlResult{Err: fmt.Errorf("timeout (*crawler).Scan %t", err)}
-		return
 
 	default:
 		page, err := c.r.Get(ctx, url) //Запрашиваем страницу через Requester
@@ -164,10 +158,11 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 		}		
 
 		for _, link := range page.GetLinks() {
-			if depth == 1 {
-				c.logger.Panic("dept == 1 PANIC message")
-			}
-			go c.Scan(ctx, link, depth-1) //На все полученные ссылки запускаем новую рутину сборки
+
+			c.mu.Lock()
+			c.wg.Add(1)
+			c.mu.Unlock()
+			go c.Scan(ctx, link, depth-1) 
 		}
 	}
 }
@@ -182,114 +177,81 @@ type Config struct {
 	MaxResults int
 	MaxErrors  int
 	Url        string
-	Timeout    int //in seconds
+	Timeout    int 
+	Time2      int
+	
 }
 
 func main() {
+	var wg sync.WaitGroup
 
-    logger, _ := zap.NewDevelopment()
-	logger.Debug("This is a DEBUG message")
-	// logger.Debug("This is a DEBUG message")
-	logger.Info("This is an INFO message")
-	logger.Info("This is an INFO message with fields", zap.String("region", "us-west"), zap.Int("id", 2))
-	// logger.Warn("This is a WARN message")
-	// logger.Error("This is an ERROR message")
-	// logger.Fatal("This is a FATAL message")   // would exit if uncommented
-	// logger.DPanic("This is a DPANIC message") // would exit if uncommented
-	// logger.Panic("This is a PANIC message")    // would exit if uncommented
-	rawJSONConfig := []byte(`{
-		"level": "info",
-		"encoding": "console",
-		"outputPaths": ["stdout", "/tmp/logs"],
-		"errorOutputPaths": ["/tmp/errorlogs"],
-		"initialFields": {"initFieldKey": "fieldValue"},
-		"encoderConfig": {
-		"messageKey": "message",
-		"levelKey": "level",
-		"nameKey": "logger",
-		"timeKey": "time",
-		"callerKey": "logger",
-		"stacktraceKey": "stacktrace",
-		"callstackKey": "callstack",
-		"errorKey": "error",
-		"timeEncoder": "iso8601",
-		"fileKey": "file",
-		"levelEncoder": "capitalColor",
-		"durationEncoder": "second",
-		"callerEncoder": "full",
-		"nameEncoder": "full",
-		"sampling": {
-			"initial": "3",
-			"thereafter": "10"
-		}
-		}
-	}`)
-
-	config := zap.Config{}
-	if err := json.Unmarshal(rawJSONConfig, &config); err != nil {
-		panic(err)
-	}
-
-	logger, err := config.Build()
-	if err != nil {
-		panic(err)
-	}
-
+	logger, _ := zap.NewDevelopment()
+	defer logger.Sync()
+	logger.Info("This is an INFO message RUN Logger ZAP")
+		
 	cfg := Config{
 		MaxDepth:   3,
-		MaxResults: 1000,
-		MaxErrors:  500,
+		MaxResults: 30,
+		MaxErrors:  100,
 		Url:        "https://telegram.org",
-		Timeout:    100,	
+		Timeout:    3,
+		Time2:      30,	
 	}
-	//var cr Crawler ругался тест
-	//var r Requester
-
 	r := NewRequester(time.Duration(cfg.Timeout) * time.Second)
-	cr := NewCrawler(r, logger)
-	ctx, cancel := context.WithCancel(context.Background())
-	// ctx, cancel := context.WithTimeout(ctx, time.Second * 300)
-	// _ = cancel1
+	cr := NewCrawler(r, logger, wg)
+	ctx, cancel := context.WithCancel(context.Background())  //lint:ignore SA4006 we love not used varible!
+	ctx, cancel = context.WithTimeout(ctx, time.Duration(cfg.Time2) * time.Second)	
+	wg.Add(1)	
 	go cr.Scan(ctx, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
-	go processResult(ctx, cancel, cr, cfg) //Обрабатываем результаты в отдельной рутине
+	go processResult(ctx, cancel, cr, cfg, logger) //Обрабатываем результаты в отдельной рутине
 
-	sigCh := make(chan os.Signal, 1)        //Создаем канал для приема сигналов, ругался тест добавил 1
+	sigCh := make(chan os.Signal, 1)       
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGUSR1) //Подписываемся на сигнал SIGINT, SIGUSR1
  
     
 	for {
 		select {
-			case <-ctx.Done(): 
-    			    return					
+			case <-ctx.Done(): 		
+			logger.Info("context Done")
+    			    return
+					// cancel()					
 		case sig := <-sigCh:
 				if sig == syscall.SIGINT  {
-				    log.Println("Cигнал SigInt - завершаем контекст")
+				    logger.Info("sycsll.SYGINT")
 				    cancel()
 				} else if sig == syscall.SIGUSR1 {
+					logger.Info("syscall.SIGUSR1")
 					cr.chUpDepth <- true
 				}
-		}						
+		}
+		wg.Wait()
+		logger.Debug("end wg.Wait ")		
+    				
 	}
+	
 }
 
-func processResult(ctx context.Context, cancel func(), cr Crawler, cfg Config) {
-	var maxResult, maxErrors = cfg.MaxResults, cfg.MaxErrors	
+func processResult(ctx context.Context, cancel func(), cr Crawler, cfg Config, logger *zap.Logger) {
+	var maxResult, maxErrors = cfg.MaxResults, cfg.MaxErrors
+	
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case msg := <-cr.ChanResult():
 			if msg.Err != nil {
-				maxErrors--
-				log.Printf("crawler result return err: %s\n", msg.Err.Error())
+				maxErrors--	
+				logger.Debug(msg.Err.Error())	
 				if maxErrors <= 0 {
+				logger.Warn("maxEroors <=0")						
 					cancel()
 					return
 				}
 			} else {
 				maxResult--
-				log.Printf("crawler result: [url: %s] Title: %s\n", msg.Url, msg.Title)
+				log.Printf("crawler result: [url: %s] T,itle: %s\n", msg.Url, msg.Title)
 				if maxResult <= 0 {
+					logger.Error("maxresult <=0")
 					cancel()
 					return
 				}
