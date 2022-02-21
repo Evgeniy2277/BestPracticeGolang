@@ -162,7 +162,6 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 			c.mu.Lock()
 			c.wg.Add(1)
 			c.mu.Unlock()
-			time.Sleep(30 * time.Millisecond)
 			go c.Scan(ctx, link, depth-1) 
 		}
 	}
@@ -200,8 +199,8 @@ func main() {
 	}
 	r := NewRequester(time.Duration(cfg.Timeout) * time.Second)
 	cr := NewCrawler(r, logger, wg)
-	// ctx, cancel := context.WithCancel(context.Background())  //lint:ignore SA4006 we love not used varible!
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Time2) * time.Second)	
+	ctx, cancel := context.WithCancel(context.Background())  //lint:ignore SA4006 we love not used varible!
+	ctx, cancel = context.WithTimeout(ctx, time.Duration(cfg.Time2) * time.Second)	
 	wg.Add(1)	
 	go cr.Scan(ctx, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
 	go processResult(ctx, cancel, cr, cfg, logger) //Обрабатываем результаты в отдельной рутине
