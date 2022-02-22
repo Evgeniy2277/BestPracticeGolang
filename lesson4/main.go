@@ -12,8 +12,16 @@ import (
 	"time"
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
+	"github.com/joho/godotenv"
+	"lesson4/config"
 )
 
+func init() {
+    // loads values from .env into the system
+    if err := godotenv.Load(); err != nil {
+	log.Print("No .env file found")
+    }
+}
 
 type CrawlResult struct {
 	Err   error
@@ -104,10 +112,10 @@ type crawler struct {
 	mu      sync.RWMutex
 	chUpDepth chan bool
 	logger *zap.Logger
-	wg sync.WaitGroup
+	wg *sync.WaitGroup
 }
 
-func NewCrawler(r Requester, loger *zap.Logger, wg sync.WaitGroup) *crawler {
+func NewCrawler(r Requester, loger *zap.Logger, wg *sync.WaitGroup) *crawler {
 	return &crawler{
 		r:       r,
 		res:     make(chan CrawlResult),
@@ -121,7 +129,7 @@ func NewCrawler(r Requester, loger *zap.Logger, wg sync.WaitGroup) *crawler {
 
 func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 	defer c.wg.Done()
-	
+
 	if depth <= 0 { 
 		c.logger.Info("depth <= 0 in Scan", zap.Int("", depth))
 		return
@@ -158,10 +166,7 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 		}		
 
 		for _, link := range page.GetLinks() {
-
-			c.mu.Lock()
-			c.wg.Add(1)
-			c.mu.Unlock()
+			c.wg.Add(1)			
 			go c.Scan(ctx, link, depth-1) 
 		}
 	}
@@ -171,68 +176,54 @@ func (c *crawler) ChanResult() <-chan CrawlResult {
 	return c.res
 }
 
-//Config - структура для конфигурации
-type Config struct {
-	MaxDepth   int
-	MaxResults int
-	MaxErrors  int
-	Url        string
-	Timeout    int 
-	Time2      int
-	
-}
 
 func main() {
+    conf := config.New()
+
 	var wg sync.WaitGroup
 
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 	logger.Info("This is an INFO message RUN Logger ZAP")
 		
-	cfg := Config{
-		MaxDepth:   3,
-		MaxResults: 30,
-		MaxErrors:  100,
-		Url:        "https://telegram.org",
-		Timeout:    3,
-		Time2:      30,	
-	}
-	r := NewRequester(time.Duration(cfg.Timeout) * time.Second)
-	cr := NewCrawler(r, logger, wg)
-	ctx, cancel := context.WithCancel(context.Background())  //lint:ignore SA4006 we love not used varible!
-	ctx, cancel = context.WithTimeout(ctx, time.Duration(cfg.Time2) * time.Second)	
+	r := NewRequester(time.Duration(conf.Timeout) * time.Second)
+	cr := NewCrawler(r, logger, &wg)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(conf.Time) * time.Second)	
+	
 	wg.Add(1)	
-	go cr.Scan(ctx, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
-	go processResult(ctx, cancel, cr, cfg, logger) //Обрабатываем результаты в отдельной рутине
+	go cr.Scan(ctx, conf.Url, conf.MaxDepth) //Запускаем краулер в отдельной рутине
+	go processResult(ctx, cancel, cr, conf, logger) //Обрабатываем результаты в отдельной рутине
 
 	sigCh := make(chan os.Signal, 1)       
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGUSR1) //Подписываемся на сигнал SIGINT, SIGUSR1
  
-    
-	for {
-		select {
+    loop:
+	    for {
+		    select {
 			case <-ctx.Done(): 		
-			logger.Info("context Done")
-    			    return
+			    logger.Info("context Done")
+    		    break loop
 					// cancel()					
-		case sig := <-sigCh:
+		    case sig := <-sigCh:
 				if sig == syscall.SIGINT  {
 				    logger.Info("sycsll.SYGINT")
-				    cancel()
+				    break loop
 				} else if sig == syscall.SIGUSR1 {
 					logger.Info("syscall.SIGUSR1")
 					cr.chUpDepth <- true
 				}
-		}
-		wg.Wait()
-		logger.Debug("end wg.Wait ")		
-    				
-	}
+		    }   
+				
+				
+	    }
+	logger.Debug("Wait wg.Wait ")
+    // wg.Wait()
+
 	
 }
 
-func processResult(ctx context.Context, cancel func(), cr Crawler, cfg Config, logger *zap.Logger) {
-	var maxResult, maxErrors = cfg.MaxResults, cfg.MaxErrors
+func processResult(ctx context.Context, cancel func(), cr Crawler, conf *config.Config, logger *zap.Logger) {
+	var maxResult, maxErrors = conf.MaxResults, conf.MaxErrors
 	
 	for {
 		select {
