@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-    "log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -107,7 +106,7 @@ type crawler struct {
 	wg sync.WaitGroup
 }
 
-func NewCrawler(r Requester, loger *zap.Logger, wg sync.WaitGroup) *crawler {
+func NewCrawler(r Requester, loger *zap.Logger, wwg *sync.WaitGroup) *crawler {
 	return &crawler{
 		r:       r,
 		res:     make(chan CrawlResult),
@@ -115,12 +114,13 @@ func NewCrawler(r Requester, loger *zap.Logger, wg sync.WaitGroup) *crawler {
 		mu:      sync.RWMutex{},
 		chUpDepth: make(chan bool, 1),
 		logger:  loger,
-		wg: wg,
+		wg: *wwg,
 	}
 }
 
 func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 	defer c.wg.Done()
+	// defer fmt.Println("wg = wd - 1")
 	
 	if depth <= 0 { 
 		c.logger.Info("depth <= 0 in Scan", zap.Int("", depth))
@@ -158,10 +158,7 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 		}		
 
 		for _, link := range page.GetLinks() {
-
-			c.mu.Lock()
 			c.wg.Add(1)
-			c.mu.Unlock()
 			go c.Scan(ctx, link, depth-1) 
 		}
 	}
@@ -191,14 +188,14 @@ func main() {
 		
 	cfg := Config{
 		MaxDepth:   3,
-		MaxResults: 30,
-		MaxErrors:  100,
+		MaxResults: 4,
+		MaxErrors:  4,
 		Url:        "https://telegram.org",
 		Timeout:    3,
 		Time2:      30,	
 	}
 	r := NewRequester(time.Duration(cfg.Timeout) * time.Second)
-	cr := NewCrawler(r, logger, wg)
+	cr := NewCrawler(r, logger, &wg)
 	ctx, cancel := context.WithCancel(context.Background())  //lint:ignore SA4006 we love not used varible!
 	ctx, cancel = context.WithTimeout(ctx, time.Duration(cfg.Time2) * time.Second)	
 	wg.Add(1)	
@@ -208,13 +205,12 @@ func main() {
 	sigCh := make(chan os.Signal, 1)       
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGUSR1) //Подписываемся на сигнал SIGINT, SIGUSR1
  
-    
+ label:   
 	for {
 		select {
 			case <-ctx.Done(): 		
 			logger.Info("context Done")
-    			    return
-					// cancel()					
+			        break label				
 		case sig := <-sigCh:
 				if sig == syscall.SIGINT  {
 				    logger.Info("sycsll.SYGINT")
@@ -223,12 +219,11 @@ func main() {
 					logger.Info("syscall.SIGUSR1")
 					cr.chUpDepth <- true
 				}
-		}
-		wg.Wait()
-		logger.Debug("end wg.Wait ")		
+		}			
     				
 	}
-	
+	logger.Debug("Wait wg.Wait ")
+	wg.Wait()	
 }
 
 func processResult(ctx context.Context, cancel func(), cr Crawler, cfg Config, logger *zap.Logger) {
@@ -243,13 +238,13 @@ func processResult(ctx context.Context, cancel func(), cr Crawler, cfg Config, l
 				maxErrors--	
 				logger.Debug(msg.Err.Error())	
 				if maxErrors <= 0 {
-				logger.Warn("maxEroors <=0")						
+				logger.Warn("maxErrors <=0 ")						
 					cancel()
 					return
 				}
 			} else {
 				maxResult--
-				log.Printf("crawler result: [url: %s] T,itle: %s\n", msg.Url, msg.Title)
+				logger.Info("crawler result: ", zap.String(msg.Url, msg.Title), )
 				if maxResult <= 0 {
 					logger.Error("maxresult <=0")
 					cancel()
