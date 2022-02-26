@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	// "fmt"
 	"io"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
 )
@@ -103,7 +105,7 @@ type crawler struct {
 	mu      sync.RWMutex
 	chUpDepth chan bool
 	logger *zap.Logger
-	wg sync.WaitGroup
+	wg *sync.WaitGroup
 }
 
 func NewCrawler(r Requester, loger *zap.Logger, wwg *sync.WaitGroup) *crawler {
@@ -111,16 +113,16 @@ func NewCrawler(r Requester, loger *zap.Logger, wwg *sync.WaitGroup) *crawler {
 		r:       r,
 		res:     make(chan CrawlResult),
 		visited: make(map[string]struct{}),
-		mu:      sync.RWMutex{},
+		mu:      sync.RWMutex{},               
 		chUpDepth: make(chan bool, 1),
 		logger:  loger,
-		wg: *wwg,
+		wg: wwg,
 	}
 }
 
 func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 	defer c.wg.Done()
-	// defer fmt.Println("wg = wd - 1")
+	// fmt.Println(depth)
 	
 	if depth <= 0 { 
 		c.logger.Info("depth <= 0 in Scan", zap.Int("", depth))
@@ -158,8 +160,10 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 		}		
 
 		for _, link := range page.GetLinks() {
+			// c.mu.Lock()
 			c.wg.Add(1)
 			go c.Scan(ctx, link, depth-1) 
+			// c.mu.Unlock()
 		}
 	}
 }
@@ -198,7 +202,7 @@ func main() {
 	cr := NewCrawler(r, logger, &wg)
 	ctx, cancel := context.WithCancel(context.Background())  //lint:ignore SA4006 we love not used varible!
 	ctx, cancel = context.WithTimeout(ctx, time.Duration(cfg.Time2) * time.Second)	
-	wg.Add(1)	
+	// wg.Add(1)	
 	go cr.Scan(ctx, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
 	go processResult(ctx, cancel, cr, cfg, logger) //Обрабатываем результаты в отдельной рутине
 
