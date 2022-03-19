@@ -5,7 +5,9 @@ run:
   tests: false
   modules-download-mode: readonly
   allow-parallel-runners: false
-  
+  skip-dirs:
+    - page
+
 output:
   format: colored-line-number
   print-issued-lines: true
@@ -14,15 +16,9 @@ output:
   path-prefix: ""
   sort-results: false
 
-#service:
-#  golangci-lint-version: 1.44.x 
-
 linters-settings:
   goimports:
-    local-prefixes: 
-      -github.com/PuerkitoBio
-      -go.uber.org
-    
+    local-prefixes: github.com/PuerkitoBio
   gocritic:
     enabled-tags:
       - diagnostic
@@ -36,10 +32,11 @@ linters-settings:
   funlen:
     lines: 100
     statesment: 50 
+
 linters:
   disable-all: true
   enable:
-    - gofmt
+    - gofmt 
     - goimports
     - govet
     - goconst

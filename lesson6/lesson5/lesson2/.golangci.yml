@@ -5,7 +5,6 @@ run:
   tests: false
   modules-download-mode: readonly
   allow-parallel-runners: false
-  
 output:
   format: colored-line-number
   print-issued-lines: true
@@ -13,16 +12,9 @@ output:
   uniq-by-line: true
   path-prefix: ""
   sort-results: false
-
-#service:
-#  golangci-lint-version: 1.44.x 
-
 linters-settings:
   goimports:
-    local-prefixes: 
-      -github.com/PuerkitoBio
-      -go.uber.org
-    
+    local-prefixes: github.com/PuerkitoBio
   gocritic:
     enabled-tags:
       - diagnostic
