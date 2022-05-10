@@ -1,0 +1,48 @@
+run:
+  concurrency: 1
+  timeout: 1m
+  issues-exit-code: 1
+  tests: false
+  modules-download-mode: readonly
+  allow-parallel-runners: false
+  skip-dirs:
+    - page
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  path-prefix: ""
+  sort-results: false
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/PuerkitoBio
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+  govet:
+    check-shadowing: true
+  goconst:
+    min-len: 2
+    min-occurents: 2
+  funlen:
+    lines: 100
+    statesment: 50 
+
+linters:
+  disable-all: true
+  enable:
+    - gofmt 
+    - goimports
+    - govet
+    - goconst
+    - funlen
+    - bodyclose 
+    - errcheck
+    - deadcode
+    - exportloopref
+  fast: false
